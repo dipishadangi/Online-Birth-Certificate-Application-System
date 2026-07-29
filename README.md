@@ -80,7 +80,7 @@ Citizen → Register/Login → Fill 3-Step Application → Upload Documents
 - **Root Directory:** `backend`
 - **Build Command:** `pip install -r requirements.txt`
 - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Environment Variables:** `DATABASE_URL`, `SECRET_KEY`, `FRONTEND_ORIGINS`
+- **Environment Variables:** `PYTHON_VERSION=3.11.9`, `DATABASE_URL`, `SECRET_KEY`, `FRONTEND_ORIGINS`
 
 ### Frontend → [Vercel.com](https://vercel.com)
 - **Root Directory:** `frontend`
