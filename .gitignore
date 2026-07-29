@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+venv/
+env/
+ENV/
+.venv/
+
+# Environment variables (do not commit secrets)
+.env
+.env.local
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# SQLite / database local files
+*.db
+*.sqlite3
+
+# Uploads
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Build & Output
+dist/
+dist_check/
+build/
+
+# IDE & OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
