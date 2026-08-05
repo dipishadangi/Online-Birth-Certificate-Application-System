@@ -18,6 +18,7 @@ class ApplicationCreate(BaseModel):
 class DocumentOut(BaseModel):
     id: int
     file_name: str
+    file_path: str
     document_type: str
     uploaded_at: datetime
 

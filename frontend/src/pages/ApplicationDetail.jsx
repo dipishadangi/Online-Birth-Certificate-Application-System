@@ -23,6 +23,23 @@ function fileIcon(name = '') {
   return FILE_ICONS[ext] || '📎'
 }
 
+function getDocUrl(filePath) {
+  if (!filePath) return ''
+  let cleanPath = filePath.replace(/\\/g, '/')
+  if (cleanPath.startsWith('http')) return cleanPath
+  if (cleanPath.includes('uploads/')) {
+    cleanPath = cleanPath.slice(cleanPath.indexOf('uploads/'))
+  }
+  const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+  const rootServer = base.replace(/\/api\/?$/, '')
+  return `${rootServer}/${cleanPath.replace(/^\//, '')}`
+}
+
+function isImageFile(fileName = '') {
+  const ext = fileName.split('.').pop()?.toLowerCase()
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)
+}
+
 export default function ApplicationDetail() {
   const { id }   = useParams()
   const { user } = useAuth()
@@ -30,6 +47,7 @@ export default function ApplicationDetail() {
   const [auditLogs, setAuditLogs]     = useState([])
   const [error, setError]             = useState('')
   const [uploadSuccess, setUploadSuccess] = useState('')
+  const [previewDoc, setPreviewDoc]   = useState(null)
 
   // Upload form
   const [documentType, setDocumentType] = useState('hospital_record')
@@ -58,6 +76,16 @@ export default function ApplicationDetail() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') setPreviewDoc(null)
+    }
+    if (previewDoc) {
+      window.addEventListener('keydown', handleKeyDown)
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [previewDoc])
 
   async function handleUpload(e) {
     e.preventDefault()
@@ -174,17 +202,42 @@ export default function ApplicationDetail() {
         ) : (
           <ul className="space-y-2 mb-5">
             {application.documents.map((doc) => (
-              <li key={doc.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">{fileIcon(doc.file_name)}</span>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-700 truncate max-w-[220px]">{doc.file_name}</p>
-                    <p className="text-xs text-slate-400">{DOC_TYPE_LABELS[doc.document_type] || doc.document_type}</p>
+              <li
+                key={doc.id}
+                onClick={() => setPreviewDoc(doc)}
+                className="flex items-center justify-between bg-slate-50 hover:bg-brand-50/60 border border-slate-100 hover:border-brand-200 rounded-xl px-4 py-3 cursor-pointer transition-all duration-200 group"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-2xl group-hover:scale-110 transition-transform duration-200">{fileIcon(doc.file_name)}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-700 group-hover:text-brand-700 truncate max-w-[200px] sm:max-w-[300px] transition-colors">
+                      {doc.file_name}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {DOC_TYPE_LABELS[doc.document_type] || doc.document_type}
+                    </p>
                   </div>
                 </div>
-                <span className="text-xs font-medium text-brand-600 bg-brand-50 border border-brand-100 px-2 py-1 rounded-lg flex-shrink-0">
-                  {DOC_TYPE_LABELS[doc.document_type] || doc.document_type}
-                </span>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                  <span className="text-xs font-medium text-brand-600 bg-brand-50 border border-brand-100 px-2 py-1 rounded-lg">
+                    {DOC_TYPE_LABELS[doc.document_type] || doc.document_type}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPreviewDoc(doc)
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-brand-700 bg-white hover:bg-brand-100 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors shadow-xs"
+                    title="View Document"
+                  >
+                    <svg className="w-3.5 h-3.5 text-slate-500 group-hover:text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    View
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -330,6 +383,87 @@ export default function ApplicationDetail() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Document Preview Modal ── */}
+      {previewDoc && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-fade-in"
+          onClick={() => setPreviewDoc(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-4xl w-full max-h-[90vh] flex flex-col animate-scale-in border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/80">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-2xl">{fileIcon(previewDoc.file_name)}</span>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-slate-800 truncate font-display">{previewDoc.file_name}</h3>
+                  <p className="text-xs text-slate-500">
+                    {DOC_TYPE_LABELS[previewDoc.document_type] || previewDoc.document_type}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={getDocUrl(previewDoc.file_path)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-outline text-xs py-1.5 px-3"
+                  title="Open in new tab"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  Open Original
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 flex items-center justify-center transition-colors text-sm font-bold"
+                  aria-label="Close preview"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-auto flex-1 flex items-center justify-center bg-slate-950/5 min-h-[300px]">
+              {isImageFile(previewDoc.file_name) ? (
+                <div className="relative flex items-center justify-center w-full h-full max-h-[70vh]">
+                  <img
+                    src={getDocUrl(previewDoc.file_path)}
+                    alt={previewDoc.file_name}
+                    className="max-h-[70vh] max-w-full object-contain rounded-xl shadow-lg border border-slate-200/80 bg-white"
+                  />
+                </div>
+              ) : previewDoc.file_name?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={getDocUrl(previewDoc.file_path)}
+                  title={previewDoc.file_name}
+                  className="w-full h-[65vh] rounded-xl border border-slate-200 shadow-sm bg-white"
+                />
+              ) : (
+                <div className="text-center py-12 px-6">
+                  <div className="text-5xl mb-4">{fileIcon(previewDoc.file_name)}</div>
+                  <p className="text-base font-semibold text-slate-700 mb-1">No inline preview available for this file format.</p>
+                  <p className="text-xs text-slate-400 mb-6">You can open or download the original file directly in your browser.</p>
+                  <a
+                    href={getDocUrl(previewDoc.file_path)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-primary"
+                  >
+                    Open Document
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

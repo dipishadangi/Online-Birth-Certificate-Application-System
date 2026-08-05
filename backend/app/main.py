@@ -1,5 +1,7 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
@@ -9,6 +11,7 @@ from app.api import auth, applications, admin
 
 # Create all tables (fine for development; use Alembic migrations for production)
 Base.metadata.create_all(bind=engine)
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
 
 # Auto-seed default admin account if not present
@@ -52,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 app.include_router(auth.router)
 app.include_router(applications.router)
