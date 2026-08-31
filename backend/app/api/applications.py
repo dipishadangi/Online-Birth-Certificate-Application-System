@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -70,15 +71,17 @@ def upload_document(
 
     upload_result = cloudinary_service.upload_file(file, folder="birth_certificates")
     content_type = file.content_type or "application/octet-stream"
+    file_size_val = upload_result.get("bytes") or getattr(file, "size", None)
 
     doc = Document(
         application_id=application.id,
         file_name=file.filename or "uploaded_document",
         file_content_type=content_type,
-        file_size=upload_result.get("bytes") or file.size,
-        cloudinary_public_id=upload_result["public_id"],
+        file_size=file_size_val,
+        cloudinary_public_id=upload_result.get("public_id", "unknown"),
         cloudinary_url=upload_result.get("secure_url"),
         document_type=document_type,
+        uploaded_at=datetime.utcnow(),
     )
     db.add(doc)
     db.commit()
