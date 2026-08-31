@@ -18,12 +18,16 @@ class ApplicationCreate(BaseModel):
 class DocumentOut(BaseModel):
     id: int
     file_name: str
-    file_path: str
     document_type: str
+    file_size: Optional[int] = None
+    file_content_type: Optional[str] = None
+    cloudinary_public_id: Optional[str] = None
+    cloudinary_url: Optional[str] = None
     uploaded_at: datetime
 
     class Config:
         from_attributes = True
+
 
 
 class ApplicationOut(BaseModel):

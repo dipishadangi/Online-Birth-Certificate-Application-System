@@ -9,3 +9,4 @@ pydantic[email]==2.9.2
 pydantic-settings==2.5.2
 alembic==1.13.2
 python-dotenv==1.0.1
+cloudinary

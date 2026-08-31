@@ -1,6 +1,3 @@
-import os
-import shutil
-import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
@@ -14,8 +11,10 @@ from app.models.application import Application, ApplicationStatus, Document, Aud
 from app.schemas.application import (
     ApplicationCreate, ApplicationOut, ApplicationDecision, AuditLogOut
 )
+from app.services.cloudinary_service import cloudinary_service
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
+
 
 
 # ---------- Citizen endpoints ----------
@@ -23,7 +22,7 @@ router = APIRouter(prefix="/api/applications", tags=["applications"])
 @router.post("", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
 def submit_application(
     payload: ApplicationCreate,
-    current_user: User = Depends(require_roles(UserRole.citizen)),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     application = Application(applicant_id=current_user.id, **payload.model_dump())
@@ -38,7 +37,7 @@ def submit_application(
 
 @router.get("/my", response_model=List[ApplicationOut])
 def my_applications(
-    current_user: User = Depends(require_roles(UserRole.citizen)),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     return (
@@ -50,37 +49,68 @@ def my_applications(
 
 
 @router.post("/{application_id}/documents", response_model=ApplicationOut)
-def upload_document(
+async def upload_document(
     application_id: int,
     document_type: str = Form(...),
     file: UploadFile = File(...),
-    current_user: User = Depends(require_roles(UserRole.citizen)),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     application = db.query(Application).filter(Application.id == application_id).first()
     if not application:
         raise HTTPException(status_code=404, detail="Application not found")
-    if application.applicant_id != current_user.id:
+    
+    is_owner = application.applicant_id == current_user.id
+    is_staff_or_admin = current_user.role in (
+        UserRole.ward_staff, UserRole.district_staff, UserRole.admin
+    )
+    if not (is_owner or is_staff_or_admin):
         raise HTTPException(status_code=403, detail="Not your application")
 
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename)[1]
-    stored_name = f"{uuid.uuid4().hex}{ext}"
-    stored_path = os.path.join(settings.UPLOAD_DIR, stored_name)
 
-    with open(stored_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    upload_result = cloudinary_service.upload_file(file, folder="birth_certificates")
+    content_type = file.content_type or "application/octet-stream"
 
     doc = Document(
         application_id=application.id,
-        file_name=file.filename,
-        file_path=stored_path,
+        file_name=file.filename or "uploaded_document",
+        file_content_type=content_type,
+        file_size=upload_result.get("bytes") or file.size,
+        cloudinary_public_id=upload_result["public_id"],
+        cloudinary_url=upload_result.get("secure_url"),
         document_type=document_type,
     )
     db.add(doc)
     db.commit()
     db.refresh(application)
     return application
+
+
+@router.get("/{application_id}/documents/{doc_id}")
+def download_document(
+    application_id: int,
+    doc_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    application = db.query(Application).filter(Application.id == application_id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    # authorization: owner or staff/admin
+    is_owner = application.applicant_id == current_user.id
+    is_staff_or_admin = current_user.role in (
+        UserRole.ward_staff, UserRole.district_staff, UserRole.admin
+    )
+    if not (is_owner or is_staff_or_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to view this document")
+
+    doc = db.query(Document).filter(Document.id == doc_id, Document.application_id == application_id).first()
+    if not doc or not doc.cloudinary_public_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return cloudinary_service.download_file_response(doc)
+
 
 
 # ---------- Shared: get single application (owner, staff, or admin) ----------

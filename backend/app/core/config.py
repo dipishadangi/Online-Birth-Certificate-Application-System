@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
 from typing import List
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -7,22 +8,51 @@ class Settings(BaseSettings):
     Central app configuration.
     Values are loaded from environment variables / .env file.
     """
-    DATABASE_URL: str = "postgresql://neondb_owner:npg_UfL8MdO5CmNn@ep-old-smoke-az05h3oz-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
-    SECRET_KEY: str = "f7f55b3f79e8531927bb7c1853d33323a2e515e177c247507190391602cb3342"
+    # -------------------------
+    # Database
+    # -------------------------
+    DATABASE_URL: str
+
+    # -------------------------
+    # JWT Authentication
+    # -------------------------
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
-    FRONTEND_ORIGINS: str = "http://localhost:5173"
+    # -------------------------
+    # Frontend / CORS
+    # -------------------------
+    FRONTEND_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
 
-    UPLOAD_DIR: str = "uploads"
 
+    # -------------------------
+    # Cloudinary
+    # -------------------------
+    CLOUDINARY_CLOUD_NAME: str
+    CLOUDINARY_API_KEY: str
+    CLOUDINARY_API_SECRET: str
+
+    # -------------------------
+    # CORS helper
+    # -------------------------
     @property
     def cors_origins(self) -> List[str]:
-        return [origin.strip() for origin in self.FRONTEND_ORIGINS.split(",")]
+        return [
+            origin.strip()
+            for origin in self.FRONTEND_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
-    class Config:
-        env_file = ".env"
+    # -------------------------
+    # Environment configuration
+    # -------------------------
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()
