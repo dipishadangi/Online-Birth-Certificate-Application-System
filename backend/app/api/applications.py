@@ -49,7 +49,7 @@ def my_applications(
 
 
 @router.post("/{application_id}/documents", response_model=ApplicationOut)
-async def upload_document(
+def upload_document(
     application_id: int,
     document_type: str = Form(...),
     file: UploadFile = File(...),
