@@ -33,6 +33,8 @@ export default function NewApplication() {
   const [form, setForm] = useState(initialForm)
   const [docType, setDocType] = useState('hospital_record')
   const [pendingDocs, setPendingDocs] = useState([])
+  const [createdAppId, setCreatedAppId] = useState(null)
+  const [uploadedDocMap, setUploadedDocMap] = useState({})
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -61,6 +63,11 @@ export default function NewApplication() {
 
   function removeDocument(id) {
     setPendingDocs((prev) => prev.filter((d) => d.id !== id))
+    setUploadedDocMap((prev) => {
+      const copy = { ...prev }
+      delete copy[id]
+      return copy
+    })
   }
 
   function goNext() {
@@ -77,28 +84,54 @@ export default function NewApplication() {
         return
       }
     }
+    if (step === 3) {
+      if (pendingDocs.length === 0) {
+        setError('Please upload at least one supporting document (e.g. Hospital Record or Parent ID) before continuing.')
+        return
+      }
+    }
     setStep((s) => s + 1)
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    setSubmitting(true)
-    try {
-      // 1. Submit core application
-      const res = await api.post('/applications', form)
-      const appId = res.data.id
 
-      // 2. Upload any attached documents to Cloudinary via backend API
+    if (pendingDocs.length === 0) {
+      setError('Please upload at least one supporting document before submitting.')
+      return
+    }
+
+    setSubmitting(true)
+    let appId = createdAppId
+
+    try {
+      // 1. Submit core application if not already created in a previous attempt
+      if (!appId) {
+        const res = await api.post('/applications', form)
+        appId = res.data.id
+        setCreatedAppId(appId)
+      }
+
+      // 2. Upload attached documents to Cloudinary via backend API
+      const newUploadedMap = { ...uploadedDocMap }
       for (const doc of pendingDocs) {
+        if (newUploadedMap[doc.id]) {
+          // Already uploaded in previous attempt
+          continue
+        }
         const formData = new FormData()
         formData.append('document_type', doc.type)
         formData.append('file', doc.file)
         await api.post(`/applications/${appId}/documents`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         })
+        newUploadedMap[doc.id] = true
+        setUploadedDocMap({ ...newUploadedMap })
       }
 
+      setCreatedAppId(null)
+      setUploadedDocMap({})
       navigate(`/applications/${appId}`)
     } catch (err) {
       let detailMsg = 'Could not submit application.'
@@ -111,7 +144,11 @@ export default function NewApplication() {
           detailMsg = err.response.data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ')
         }
       } else if (err.message) {
-        detailMsg = `Submission error: ${err.message}`
+        detailMsg = `Document upload failed: ${err.message}`
+      }
+
+      if (appId) {
+        detailMsg += ` (Application #${appId} draft created. Click "Submit Application" to retry uploading documents).`
       }
       setError(detailMsg)
     } finally {
@@ -291,12 +328,22 @@ export default function NewApplication() {
                 📷
               </div>
               <div>
-                <h2 className="font-bold text-slate-800 font-display">Upload Supporting Documents</h2>
+                <h2 className="font-bold text-slate-800 font-display flex items-center gap-2">
+                  Upload Supporting Documents
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">Required</span>
+                </h2>
                 <p className="text-xs text-slate-400">
-                  Upload images or PDFs of hospital records, parent IDs, or certificates
+                  Upload images or PDFs of hospital records, parent IDs, or certificates (at least 1 document required)
                 </p>
               </div>
             </div>
+
+            {pendingDocs.length === 0 && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs flex items-center gap-2">
+                <span className="text-base">⚠️</span>
+                <span>At least one supporting document (Hospital Birth Record or Parent ID) is required to submit your application.</span>
+              </div>
+            )}
 
             {/* Document upload picker */}
             <div className="bg-slate-50 rounded-xl p-5 border border-slate-200/80 space-y-4">
@@ -424,7 +471,7 @@ export default function NewApplication() {
                   { label: 'Permanent Address', value: form.permanent_address },
                 ]}
               />
-              {pendingDocs.length > 0 && (
+              {pendingDocs.length > 0 ? (
                 <>
                   <div className="border-t border-slate-200" />
                   <div>
@@ -443,6 +490,16 @@ export default function NewApplication() {
                     </div>
                   </div>
                 </>
+              ) : (
+                <>
+                  <div className="border-t border-slate-200" />
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center justify-between">
+                    <span className="font-semibold">⚠️ No document attached! Please go back to Step 3 to upload your document.</span>
+                    <button type="button" onClick={() => setStep(3)} className="underline text-red-800 font-bold ml-2">
+                      Upload Document
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 
@@ -456,7 +513,7 @@ export default function NewApplication() {
               <button
                 id="submit-application"
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || pendingDocs.length === 0}
                 className="btn-primary"
               >
                 {submitting ? (
