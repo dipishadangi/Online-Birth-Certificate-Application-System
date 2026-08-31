@@ -123,9 +123,7 @@ export default function NewApplication() {
         const formData = new FormData()
         formData.append('document_type', doc.type)
         formData.append('file', doc.file)
-        await api.post(`/applications/${appId}/documents`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        })
+        await api.post(`/applications/${appId}/documents`, formData)
         newUploadedMap[doc.id] = true
         setUploadedDocMap({ ...newUploadedMap })
       }

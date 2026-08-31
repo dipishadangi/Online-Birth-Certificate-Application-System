@@ -35,10 +35,17 @@ class CloudinaryService:
         """
         try:
             file.file.seek(0)
+            file_bytes = file.file.read()
+            content_type = (file.content_type or "").lower()
+            filename = (file.filename or "").lower()
+            resource_type = "auto"
+            if "pdf" in content_type or filename.endswith(".pdf"):
+                resource_type = "raw"
+
             response = cloudinary.uploader.upload(
-                file.file,
+                file_bytes,
                 folder=folder,
-                resource_type="auto",
+                resource_type=resource_type,
             )
             return response
         except Exception as e:
