@@ -163,6 +163,131 @@ export default function ApplicationDetail() {
     });
   }
 
+  function getImageDimensions(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        resolve({
+          width: img.naturalWidth || 800,
+          height: img.naturalHeight || 600,
+        });
+      };
+      img.onerror = () => {
+        resolve({ width: 800, height: 600 });
+      };
+      img.src = dataUrl;
+    });
+  }
+
+  function trimImageLetterbox(dataUrl) {
+    return new Promise((resolve) => {
+      if (!dataUrl || !dataUrl.startsWith("data:image")) return resolve(dataUrl);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+
+          if (!w || !h || w < 50 || h < 50) return resolve(dataUrl);
+
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(img, 0, 0);
+
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+
+          const isDarkPixel = (idx) => data[idx] < 40 && data[idx + 1] < 40 && data[idx + 2] < 40;
+
+          // Check top dark rows
+          let top = 0;
+          for (let y = 0; y < Math.floor(h * 0.45); y++) {
+            let allDark = true;
+            for (let x = 0; x < w; x += 8) {
+              const idx = (y * w + x) * 4;
+              if (!isDarkPixel(idx)) {
+                allDark = false;
+                break;
+              }
+            }
+            if (allDark) top = y;
+            else break;
+          }
+
+          // Check bottom dark rows
+          let bottom = h - 1;
+          for (let y = h - 1; y >= Math.ceil(h * 0.55); y--) {
+            let allDark = true;
+            for (let x = 0; x < w; x += 8) {
+              const idx = (y * w + x) * 4;
+              if (!isDarkPixel(idx)) {
+                allDark = false;
+                break;
+              }
+            }
+            if (allDark) bottom = y;
+            else break;
+          }
+
+          // Check left dark columns
+          let left = 0;
+          for (let x = 0; x < Math.floor(w * 0.35); x++) {
+            let allDark = true;
+            for (let y = top; y <= bottom; y += 8) {
+              const idx = (y * w + x) * 4;
+              if (!isDarkPixel(idx)) {
+                allDark = false;
+                break;
+              }
+            }
+            if (allDark) left = x;
+            else break;
+          }
+
+          // Check right dark columns
+          let right = w - 1;
+          for (let x = w - 1; x >= Math.ceil(w * 0.65); x--) {
+            let allDark = true;
+            for (let y = top; y <= bottom; y += 8) {
+              const idx = (y * w + x) * 4;
+              if (!isDarkPixel(idx)) {
+                allDark = false;
+                break;
+              }
+            }
+            if (allDark) right = x;
+            else break;
+          }
+
+          const cropW = right - left + 1;
+          const cropH = bottom - top + 1;
+
+          // If we trimmed significant black bars (> 4% of dimension)
+          if (
+            (top > h * 0.04 || bottom < h * 0.96 || left > w * 0.04 || right < w * 0.96) &&
+            cropW > w * 0.2 &&
+            cropH > h * 0.2
+          ) {
+            const cropCanvas = document.createElement("canvas");
+            cropCanvas.width = cropW;
+            cropCanvas.height = cropH;
+            const cropCtx = cropCanvas.getContext("2d");
+            cropCtx.drawImage(img, left, top, cropW, cropH, 0, 0, cropW, cropH);
+            return resolve(cropCanvas.toDataURL("image/jpeg", 0.95));
+          }
+
+          resolve(dataUrl);
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
   async function downloadCertificatePDF() {
     if (!application) return;
     setPdfGenerating(true);
@@ -387,42 +512,70 @@ export default function ApplicationDetail() {
 
         for (let i = 0; i < imageDocs.length; i++) {
           const doc = imageDocs[i];
-          const dataUrl = await fetchImageAsDataUrl(doc);
-
-          // Check if we need a new page
-          if (py > H - 90) {
-            pdf.addPage();
-            pdf.setDrawColor(0, 51, 102);
-            pdf.setLineWidth(1.5);
-            pdf.rect(8, 8, W - 16, H - 16);
-            pdf.setLineWidth(0.5);
-            pdf.rect(11, 11, W - 22, H - 22);
-            py = 22;
+          let dataUrl = await fetchImageAsDataUrl(doc);
+          if (dataUrl) {
+            dataUrl = await trimImageLetterbox(dataUrl);
           }
-
-          // Document label
-          pdf.setFontSize(9);
-          pdf.setFont("helvetica", "bold");
-          pdf.setTextColor(0, 51, 102);
-          pdf.text(`Document ${i + 1}: ${DOC_TYPE_LABELS[doc.document_type] || doc.document_type}`, margin + 5, py);
-          py += 2;
-          pdf.setFontSize(7);
-          pdf.setFont("helvetica", "normal");
-          pdf.setTextColor(120);
-          pdf.text(`File: ${doc.file_name}`, margin + 5, py + 3);
-          py += 8;
 
           if (dataUrl) {
             try {
-              const imgW = innerW - 20;
-              const imgH = 80;
-              // Document image border
+              const { width: origW, height: origH } = await getImageDimensions(dataUrl);
+              const imgAspect = origW / origH;
+
+              const maxW = innerW - 10; // 170 mm max printable width
+              const maxH = 190; // 190 mm max height per document
+
+              let imgW = maxW;
+              let imgH = maxW / imgAspect;
+
+              if (imgH > maxH) {
+                imgH = maxH;
+                imgW = maxH * imgAspect;
+              }
+
+              // Required space for document header text (~15mm) + image + padding (~12mm)
+              const requiredSpace = imgH + 27;
+
+              // Check if adding this document will overflow page height
+              if (py + requiredSpace > H - 15) {
+                pdf.addPage();
+                pdf.setDrawColor(0, 51, 102);
+                pdf.setLineWidth(1.5);
+                pdf.rect(8, 8, W - 16, H - 16);
+                pdf.setLineWidth(0.5);
+                pdf.rect(11, 11, W - 22, H - 22);
+                py = 22;
+              }
+
+              // Document label
+              pdf.setFontSize(9);
+              pdf.setFont("helvetica", "bold");
+              pdf.setTextColor(0, 51, 102);
+              pdf.text(`Document ${i + 1}: ${DOC_TYPE_LABELS[doc.document_type] || doc.document_type}`, margin + 5, py);
+              py += 2;
+              pdf.setFontSize(7);
+              pdf.setFont("helvetica", "normal");
+              pdf.setTextColor(120);
+              pdf.text(`File: ${doc.file_name}`, margin + 5, py + 3);
+              py += 8;
+
+              // Center image horizontally within the printable area
+              const imgX = margin + (innerW - imgW) / 2;
+
+              // Document image border matching uncompressed image size
               pdf.setDrawColor(180);
               pdf.setLineWidth(0.3);
-              pdf.rect(margin + 10 - 1, py - 1, imgW + 2, imgH + 2);
-              pdf.addImage(dataUrl, "JPEG", margin + 10, py, imgW, imgH);
-              py += imgH + 10;
-            } catch {
+              pdf.rect(imgX - 1, py - 1, imgW + 2, imgH + 2);
+
+              const mimeMatch = dataUrl.match(/^data:image\/(png|jpe?g|webp);/i);
+              const format = mimeMatch
+                ? (mimeMatch[1].toUpperCase() === "JPG" ? "JPEG" : mimeMatch[1].toUpperCase())
+                : "JPEG";
+
+              pdf.addImage(dataUrl, format, imgX, py, imgW, imgH);
+              py += imgH + 12;
+            } catch (err) {
+              console.error("Image embed error:", err);
               pdf.setFontSize(8);
               pdf.setTextColor(180);
               pdf.text("[Image could not be embedded]", margin + 10, py + 5);

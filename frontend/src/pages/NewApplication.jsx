@@ -343,6 +343,43 @@ export default function NewApplication() {
               </div>
             )}
 
+            {/* Document Upload Guidelines & Tips */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50/70 border border-blue-200/80 rounded-2xl p-4 sm:p-5 space-y-3">
+              <div className="flex items-center gap-2 text-blue-900 font-bold text-xs uppercase tracking-wider">
+                <span className="text-sm">💡</span> Document Upload Instructions & Guidelines
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-700">
+                <div className="flex items-start gap-2.5 bg-white/80 backdrop-blur-xs p-3 rounded-xl border border-blue-100 shadow-2xs">
+                  <span className="text-blue-600 text-base flex-shrink-0">✂️</span>
+                  <div>
+                    <strong className="block text-slate-800 font-semibold mb-0.5">Crop Extra Margins & Black Bars</strong>
+                    Trim off black letterboxing, scanner padding, or blank background spaces before uploading.
+                  </div>
+                </div>
+                <div className="flex items-start gap-2.5 bg-white/80 backdrop-blur-xs p-3 rounded-xl border border-blue-100 shadow-2xs">
+                  <span className="text-blue-600 text-base flex-shrink-0">📐</span>
+                  <div>
+                    <strong className="block text-slate-800 font-semibold mb-0.5">Proper Orientation</strong>
+                    Upload landscape documents (e.g. Citizenship cards) horizontally and portrait documents vertically.
+                  </div>
+                </div>
+                <div className="flex items-start gap-2.5 bg-white/80 backdrop-blur-xs p-3 rounded-xl border border-blue-100 shadow-2xs">
+                  <span className="text-blue-600 text-base flex-shrink-0">🔍</span>
+                  <div>
+                    <strong className="block text-slate-800 font-semibold mb-0.5">Clear & Readable Text</strong>
+                    Ensure details, registration numbers, government seals, and signatures are legible.
+                  </div>
+                </div>
+                <div className="flex items-start gap-2.5 bg-white/80 backdrop-blur-xs p-3 rounded-xl border border-blue-100 shadow-2xs">
+                  <span className="text-blue-600 text-base flex-shrink-0">📁</span>
+                  <div>
+                    <strong className="block text-slate-800 font-semibold mb-0.5">Supported File Formats</strong>
+                    JPG, PNG, WEBP, or PDF files. Max size up to 10MB per file.
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Document upload picker */}
             <div className="bg-slate-50 rounded-xl p-5 border border-slate-200/80 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -391,7 +428,7 @@ export default function NewApplication() {
                           <img
                             src={doc.preview}
                             alt="preview"
-                            className="w-10 h-10 object-cover rounded-lg border border-slate-200 flex-shrink-0"
+                            className="w-10 h-10 object-contain bg-slate-50 rounded-lg border border-slate-200 flex-shrink-0"
                           />
                         ) : (
                           <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs flex-shrink-0">
