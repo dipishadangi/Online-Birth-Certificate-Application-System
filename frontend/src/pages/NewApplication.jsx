@@ -501,13 +501,15 @@ export default function NewApplication() {
               )}
             </div>
 
-            <div className="flex justify-between pt-2">
+            <div className="flex justify-between items-center pt-2">
               <button type="button" onClick={() => setStep(3)} className="btn-ghost">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
                 Back
               </button>
+
+              <div className="flex items-center gap-3">
               <button
                 id="submit-application"
                 type="submit"
@@ -547,6 +549,7 @@ export default function NewApplication() {
                   </>
                 )}
               </button>
+              </div>
             </div>
           </div>
         )}

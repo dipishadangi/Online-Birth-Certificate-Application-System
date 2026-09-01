@@ -12,7 +12,6 @@ from app.schemas.user import UserOut, UserCreate
 from app.schemas.application import ApplicationOut, StatsOut, AuditLogOut
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
-
 admin_only = require_roles(UserRole.admin)
 
 
@@ -28,8 +27,7 @@ def create_staff_user(
     db: Session = Depends(get_db),
 ):
     """Admin-only: create staff/admin accounts with a specific role."""
-    existing = db.query(User).filter(User.email == payload.email).first()
-    if existing:
+    if db.query(User).filter(User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
@@ -72,12 +70,8 @@ def all_audit_logs(current_user: User = Depends(admin_only), db: Session = Depen
 @router.get("/stats", response_model=StatsOut)
 def stats(current_user: User = Depends(admin_only), db: Session = Depends(get_db)):
     total = db.query(Application).count()
-    pending = db.query(Application).filter(Application.status == ApplicationStatus.pending).count()
-    under_review = db.query(Application).filter(Application.status == ApplicationStatus.under_review).count()
-    forwarded = db.query(Application).filter(Application.status == ApplicationStatus.forwarded).count()
-    approved = db.query(Application).filter(Application.status == ApplicationStatus.approved).count()
-    rejected = db.query(Application).filter(Application.status == ApplicationStatus.rejected).count()
-    return StatsOut(
-        total=total, pending=pending, under_review=under_review,
-        forwarded=forwarded, approved=approved, rejected=rejected,
-    )
+    counts = {
+        s.value: db.query(Application).filter(Application.status == s).count()
+        for s in ApplicationStatus
+    }
+    return StatsOut(total=total, **counts)

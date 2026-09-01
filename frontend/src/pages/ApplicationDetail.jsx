@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import { jsPDF } from "jspdf";
 import api from "../api/client";
 import StatusBadge from "../components/StatusBadge.jsx";
 import LoadingSpinner from "../components/LoadingSpinner.jsx";
@@ -8,6 +9,8 @@ import { useAuth } from "../context/AuthContext.jsx";
 const DOC_TYPE_LABELS = {
   hospital_record: "Hospital Record",
   parent_id: "Parent's ID",
+  parent_citizenship: "Parent Citizenship Certificate / ID",
+  marriage_certificate: "Parents Marriage Certificate",
   other: "Other",
 };
 
@@ -55,7 +58,7 @@ export default function ApplicationDetail() {
   const [previewDoc, setPreviewDoc] = useState(null);
   const [previewSrc, setPreviewSrc] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-
+  const [pdfGenerating, setPdfGenerating] = useState(false);
 
   // Decision form
   const [reason, setReason] = useState("");
@@ -130,6 +133,320 @@ export default function ApplicationDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewDoc]);
 
+
+  // ── PDF Generation (Government-style certificate) ──
+
+  async function fetchImageAsDataUrl(doc) {
+    try {
+      // Try cloudinary_url first (direct image link)
+      if (doc.cloudinary_url && isImageFile(doc.file_name)) {
+        const response = await fetch(doc.cloudinary_url);
+        const blob = await response.blob();
+        return await blobToDataUrl(blob);
+      }
+      // Fallback: fetch from API endpoint
+      const res = await api.get(
+        `/applications/${id}/documents/${doc.id}`,
+        { responseType: "blob" },
+      );
+      return await blobToDataUrl(res.data);
+    } catch {
+      return null;
+    }
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function downloadCertificatePDF() {
+    if (!application) return;
+    setPdfGenerating(true);
+
+    try {
+      const pdf = new jsPDF("p", "mm", "a4");
+      const W = pdf.internal.pageSize.getWidth();   // 210
+      const H = pdf.internal.pageSize.getHeight();  // 297
+      const margin = 15;
+      const innerW = W - margin * 2;
+
+      // ── Double border frame ──
+      pdf.setDrawColor(0, 51, 102);
+      pdf.setLineWidth(1.5);
+      pdf.rect(8, 8, W - 16, H - 16);
+      pdf.setLineWidth(0.5);
+      pdf.rect(11, 11, W - 22, H - 22);
+
+      // ── Header: Nepal Government style ──
+      let y = 22;
+
+      // Emblem circle placeholder
+      pdf.setFillColor(0, 51, 102);
+      pdf.circle(W / 2, y + 8, 9, "F");
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(10);
+      pdf.setFont("helvetica", "bold");
+      pdf.text("NP", W / 2, y + 10, { align: "center" });
+      y += 22;
+
+      // Title block
+      pdf.setTextColor(0, 51, 102);
+      pdf.setFontSize(11);
+      pdf.setFont("helvetica", "normal");
+      pdf.text("Government of Nepal", W / 2, y, { align: "center" });
+      y += 5;
+      pdf.text("Ministry of Home Affairs", W / 2, y, { align: "center" });
+      y += 5;
+      pdf.text("Department of Civil Registration", W / 2, y, { align: "center" });
+      y += 8;
+
+      // Certificate title
+      pdf.setFontSize(20);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(0, 51, 102);
+      pdf.text("BIRTH CERTIFICATE APPLICATION", W / 2, y, { align: "center" });
+      y += 4;
+
+      // Decorative line under title
+      pdf.setDrawColor(0, 51, 102);
+      pdf.setLineWidth(0.8);
+      pdf.line(W / 2 - 40, y, W / 2 + 40, y);
+      y += 2;
+      pdf.setLineWidth(0.3);
+      pdf.line(W / 2 - 35, y, W / 2 + 35, y);
+      y += 6;
+
+      // Registration number and date
+      pdf.setFontSize(9);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(80);
+      pdf.text(`Registration No: APP-${String(application.id).padStart(6, "0")}`, margin + 5, y);
+      pdf.text(
+        `Date: ${new Date(application.updated_at || application.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`,
+        W - margin - 5, y, { align: "right" }
+      );
+      y += 8;
+
+      // ── Certificate body ──
+      pdf.setDrawColor(200);
+      pdf.setLineWidth(0.2);
+
+      // "This is to certify..." preamble
+      pdf.setFontSize(10);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(40);
+      pdf.text(
+        "This is to certify that the following birth has been duly registered in the records of the",
+        W / 2, y, { align: "center" }
+      );
+      y += 5;
+      pdf.text("Department of Civil Registration, Government of Nepal.", W / 2, y, { align: "center" });
+      y += 10;
+
+      // ── Data table ──
+      const labelX = margin + 8;
+      const valueX = margin + 62;
+      const rowH = 9;
+
+      function drawRow(label, value, highlight) {
+        // Alternating row background
+        if (highlight) {
+          pdf.setFillColor(240, 244, 255);
+          pdf.rect(margin + 3, y - 5, innerW - 6, rowH, "F");
+        }
+        pdf.setFontSize(9);
+        pdf.setFont("helvetica", "normal");
+        pdf.setTextColor(100);
+        pdf.text(label, labelX, y);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(20);
+        pdf.text(String(value || "\u2014"), valueX, y);
+        // Bottom line
+        pdf.setDrawColor(220);
+        pdf.setLineWidth(0.15);
+        pdf.line(margin + 3, y + 3, W - margin - 3, y + 3);
+        y += rowH;
+      }
+
+      // Section: Child Information
+      pdf.setFillColor(0, 51, 102);
+      pdf.rect(margin + 3, y - 5, innerW - 6, 7, "F");
+      pdf.setFontSize(9);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(255);
+      pdf.text("  CHILD INFORMATION", margin + 5, y - 0.5);
+      y += 6;
+
+      drawRow("Full Name", application.child_name, true);
+      drawRow("Date of Birth", application.date_of_birth, false);
+      drawRow("Place of Birth", application.place_of_birth, true);
+      drawRow("Gender", application.gender, false);
+      y += 3;
+
+      // Section: Parent / Guardian Information
+      pdf.setFillColor(0, 51, 102);
+      pdf.rect(margin + 3, y - 5, innerW - 6, 7, "F");
+      pdf.setFontSize(9);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(255);
+      pdf.text("  PARENT / GUARDIAN INFORMATION", margin + 5, y - 0.5);
+      y += 6;
+
+      drawRow("Father's Name", application.father_name, true);
+      drawRow("Mother's Name", application.mother_name, false);
+      drawRow("Permanent Address", application.permanent_address, true);
+      y += 3;
+
+      // Section: Registration Details
+      pdf.setFillColor(0, 51, 102);
+      pdf.rect(margin + 3, y - 5, innerW - 6, 7, "F");
+      pdf.setFontSize(9);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(255);
+      pdf.text("  REGISTRATION DETAILS", margin + 5, y - 0.5);
+      y += 6;
+
+      drawRow("Application ID", `APP-${String(application.id).padStart(6, "0")}`, true);
+      drawRow("Status", "APPROVED", false);
+      drawRow("Date of Application", new Date(application.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }), true);
+      drawRow("Date of Approval", new Date(application.updated_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }), false);
+      y += 5;
+
+      // ── Signature section ──
+      pdf.setDrawColor(0);
+      pdf.setLineWidth(0.3);
+
+      const sigY = H - 50;
+
+      // Left: Applicant
+      pdf.line(margin + 10, sigY, margin + 65, sigY);
+      pdf.setFontSize(8);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(80);
+      pdf.text("Applicant's Signature", margin + 18, sigY + 5);
+
+      // Right: Registrar
+      pdf.line(W - margin - 65, sigY, W - margin - 10, sigY);
+      pdf.text("Registrar's Signature & Seal", W - margin - 63, sigY + 5);
+
+      // Official stamp placeholder circle
+      pdf.setDrawColor(0, 51, 102);
+      pdf.setLineWidth(0.5);
+      pdf.circle(W / 2, sigY - 3, 12, "S");
+      pdf.setFontSize(6);
+      pdf.setTextColor(0, 51, 102);
+      pdf.text("OFFICIAL", W / 2, sigY - 5, { align: "center" });
+      pdf.text("SEAL", W / 2, sigY - 1, { align: "center" });
+
+      // Footer
+      pdf.setFontSize(7);
+      pdf.setFont("helvetica", "italic");
+      pdf.setTextColor(140);
+      pdf.text(
+        "This is a computer-generated document issued by the Online Birth Certificate Application System.",
+        W / 2, H - 22, { align: "center" }
+      );
+      pdf.text(
+        "Please bring this document along with original documents for verification at the Ward Office.",
+        W / 2, H - 18, { align: "center" }
+      );
+
+      // ── Page 2: Attached Documents (with embedded images) ──
+      const imageDocs = (application.documents || []).filter((d) => isImageFile(d.file_name));
+
+      if (imageDocs.length > 0) {
+        pdf.addPage();
+
+        // Border on page 2
+        pdf.setDrawColor(0, 51, 102);
+        pdf.setLineWidth(1.5);
+        pdf.rect(8, 8, W - 16, H - 16);
+        pdf.setLineWidth(0.5);
+        pdf.rect(11, 11, W - 22, H - 22);
+
+        let py = 22;
+        pdf.setFontSize(14);
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(0, 51, 102);
+        pdf.text("ATTACHED SUPPORTING DOCUMENTS", W / 2, py, { align: "center" });
+        py += 3;
+        pdf.setDrawColor(0, 51, 102);
+        pdf.setLineWidth(0.5);
+        pdf.line(W / 2 - 45, py, W / 2 + 45, py);
+        py += 8;
+
+        pdf.setFontSize(8);
+        pdf.setFont("helvetica", "normal");
+        pdf.setTextColor(100);
+        pdf.text(`Application: APP-${String(application.id).padStart(6, "0")}  |  Child: ${application.child_name}`, W / 2, py, { align: "center" });
+        py += 10;
+
+        for (let i = 0; i < imageDocs.length; i++) {
+          const doc = imageDocs[i];
+          const dataUrl = await fetchImageAsDataUrl(doc);
+
+          // Check if we need a new page
+          if (py > H - 90) {
+            pdf.addPage();
+            pdf.setDrawColor(0, 51, 102);
+            pdf.setLineWidth(1.5);
+            pdf.rect(8, 8, W - 16, H - 16);
+            pdf.setLineWidth(0.5);
+            pdf.rect(11, 11, W - 22, H - 22);
+            py = 22;
+          }
+
+          // Document label
+          pdf.setFontSize(9);
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(0, 51, 102);
+          pdf.text(`Document ${i + 1}: ${DOC_TYPE_LABELS[doc.document_type] || doc.document_type}`, margin + 5, py);
+          py += 2;
+          pdf.setFontSize(7);
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(120);
+          pdf.text(`File: ${doc.file_name}`, margin + 5, py + 3);
+          py += 8;
+
+          if (dataUrl) {
+            try {
+              const imgW = innerW - 20;
+              const imgH = 80;
+              // Document image border
+              pdf.setDrawColor(180);
+              pdf.setLineWidth(0.3);
+              pdf.rect(margin + 10 - 1, py - 1, imgW + 2, imgH + 2);
+              pdf.addImage(dataUrl, "JPEG", margin + 10, py, imgW, imgH);
+              py += imgH + 10;
+            } catch {
+              pdf.setFontSize(8);
+              pdf.setTextColor(180);
+              pdf.text("[Image could not be embedded]", margin + 10, py + 5);
+              py += 15;
+            }
+          } else {
+            pdf.setFontSize(8);
+            pdf.setTextColor(180);
+            pdf.text("[Image could not be loaded]", margin + 10, py + 5);
+            py += 15;
+          }
+        }
+      }
+
+      // Save the PDF
+      const fileName = `Birth_Certificate_APP-${String(application.id).padStart(6, "0")}_${application.child_name.replace(/\s+/g, "_")}.pdf`;
+      pdf.save(fileName);
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      setError("Failed to generate PDF. Please try again.");
+    } finally {
+      setPdfGenerating(false);
+    }
+  }
 
 
   async function handleDecision(action) {
@@ -225,6 +542,47 @@ export default function ApplicationDetail() {
       </div>
 
       {error && <div className="alert-error mb-5">{error}</div>}
+
+      {/* ── Download Certificate (only when approved) ── */}
+      {application.status === "approved" && (
+        <div className="card p-6 mb-5 border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-green-50 animate-slide-up">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center text-3xl shadow-lg flex-shrink-0">
+              📜
+            </div>
+            <div className="flex-1">
+              <h3 className="font-bold text-emerald-900 font-display text-lg">Your Application is Approved!</h3>
+              <p className="text-sm text-emerald-700 mt-0.5">
+                Download the official birth certificate application PDF and bring it to your Ward Office for final processing.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={downloadCertificatePDF}
+            disabled={pdfGenerating}
+            id="download-certificate-pdf"
+            className="mt-4 w-full flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-bold text-sm shadow-lg shadow-emerald-200 active:scale-[0.98] transition-all duration-200 disabled:opacity-60 disabled:cursor-wait"
+          >
+            {pdfGenerating ? (
+              <>
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                Generating PDF...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Download Birth Certificate (PDF)
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* ── Application Info ── */}
       <div className="card p-6 mb-5 animate-slide-up delay-75">

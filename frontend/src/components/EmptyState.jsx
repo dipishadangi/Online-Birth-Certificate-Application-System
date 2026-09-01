@@ -28,33 +28,16 @@ const ICONS = {
   ),
 }
 
-export default function EmptyState({
-  icon = 'empty',
-  title = 'Nothing here yet',
-  description = '',
-  actionLabel = '',
-  actionTo = '',
-  onAction = null,
-}) {
+export default function EmptyState({ icon = 'empty', title = 'Nothing here yet', description, actionLabel, actionTo, onAction }) {
   return (
     <div className="flex flex-col items-center justify-center text-center py-16 px-4 animate-slide-up">
       <div className="animate-float mb-5">
         {ICONS[icon] || ICONS.empty}
       </div>
       <h3 className="text-xl font-bold text-slate-700 mb-2">{title}</h3>
-      {description && (
-        <p className="text-slate-500 text-sm max-w-xs mb-6">{description}</p>
-      )}
-      {actionLabel && actionTo && (
-        <Link to={actionTo} className="btn-primary">
-          {actionLabel}
-        </Link>
-      )}
-      {actionLabel && onAction && (
-        <button onClick={onAction} className="btn-primary">
-          {actionLabel}
-        </button>
-      )}
+      {description && <p className="text-slate-500 text-sm max-w-xs mb-6">{description}</p>}
+      {actionLabel && actionTo && <Link to={actionTo} className="btn-primary">{actionLabel}</Link>}
+      {actionLabel && onAction && <button onClick={onAction} className="btn-primary">{actionLabel}</button>}
     </div>
   )
 }

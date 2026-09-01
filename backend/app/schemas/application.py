@@ -1,5 +1,6 @@
 from datetime import datetime, date
 from typing import Optional, List
+
 from pydantic import BaseModel
 
 from app.models.application import ApplicationStatus
@@ -29,7 +30,6 @@ class DocumentOut(BaseModel):
         from_attributes = True
 
 
-
 class ApplicationOut(BaseModel):
     id: int
     applicant_id: int
@@ -51,7 +51,6 @@ class ApplicationOut(BaseModel):
 
 
 class ApplicationDecision(BaseModel):
-    """Used by ward/district staff to approve, reject, or forward."""
     action: str  # "approve" | "reject" | "forward"
     reason: Optional[str] = None
 

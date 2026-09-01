@@ -1,16 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Enum,
-    DateTime,
-    ForeignKey,
-    Text,
-    Date,
-)
+from sqlalchemy import Column, Integer, String, Enum, DateTime, ForeignKey, Text, Date
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -41,135 +32,48 @@ class Application(Base):
     mother_name = Column(String, nullable=False)
     permanent_address = Column(String, nullable=False)
 
-    # Application status
-    status = Column(
-        Enum(ApplicationStatus),
-        default=ApplicationStatus.pending,
-        nullable=False,
-    )
-
+    # Status
+    status = Column(Enum(ApplicationStatus), default=ApplicationStatus.pending, nullable=False)
     rejection_reason = Column(Text, nullable=True)
 
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-    )
-
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    applicant = relationship(
-        "User",
-        back_populates="applications",
-        foreign_keys=[applicant_id],
-    )
-
-    documents = relationship(
-        "Document",
-        back_populates="application",
-        cascade="all, delete-orphan",
-    )
-
-    audit_logs = relationship(
-        "AuditLog",
-        back_populates="application",
-        cascade="all, delete-orphan",
-    )
+    applicant = relationship("User", back_populates="applications", foreign_keys=[applicant_id])
+    documents = relationship("Document", back_populates="application", cascade="all, delete-orphan", lazy="selectin")
+    audit_logs = relationship("AuditLog", back_populates="application", cascade="all, delete-orphan", lazy="selectin")
 
 
 class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
 
-    application_id = Column(
-        Integer,
-        ForeignKey("applications.id"),
-        nullable=False,
-    )
-
-    # Original file information
     file_name = Column(String, nullable=False)
+    file_content_type = Column(String, nullable=True)
+    file_size = Column(Integer, nullable=True)
+    document_type = Column(String, nullable=False)
 
-    file_content_type = Column(
-        String,
-        nullable=True,
-    )
+    # Cloudinary storage
+    cloudinary_public_id = Column(String, nullable=True)
+    cloudinary_url = Column(String, nullable=True)
 
-    file_size = Column(
-        Integer,
-        nullable=True,
-    )
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
 
-    # Cloudinary information
-    cloudinary_public_id = Column(
-        String,
-        nullable=False,
-    )
-
-    cloudinary_url = Column(
-        String,
-        nullable=True,
-    )
-
-    # Type of document
-    document_type = Column(
-        String,
-        nullable=False,
-    )
-
-    uploaded_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-    )
-
-    # Relationship
-    application = relationship(
-        "Application",
-        back_populates="documents",
-    )
+    application = relationship("Application", back_populates="documents")
 
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String, nullable=False)
+    notes = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
 
-    application_id = Column(
-        Integer,
-        ForeignKey("applications.id"),
-        nullable=False,
-    )
-
-    actor_id = Column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=False,
-    )
-
-    action = Column(
-        String,
-        nullable=False,
-    )
-
-    notes = Column(
-        Text,
-        nullable=True,
-    )
-
-    timestamp = Column(
-        DateTime,
-        default=datetime.utcnow,
-    )
-
-    # Relationships
-    application = relationship(
-        "Application",
-        back_populates="audit_logs",
-    )
-
+    application = relationship("Application", back_populates="audit_logs")
     actor = relationship("User")

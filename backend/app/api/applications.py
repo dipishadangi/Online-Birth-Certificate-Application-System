@@ -4,21 +4,40 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
 from app.models.application import Application, ApplicationStatus, Document, AuditLog
-from app.schemas.application import (
-    ApplicationCreate, ApplicationOut, ApplicationDecision, AuditLogOut
-)
+from app.schemas.application import ApplicationCreate, ApplicationOut, ApplicationDecision, AuditLogOut
 from app.services.cloudinary_service import cloudinary_service
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
+STAFF_ROLES = (UserRole.ward_staff, UserRole.district_staff, UserRole.admin)
 
 
-# ---------- Citizen endpoints ----------
+def _get_app_or_404(db: Session, app_id: int) -> Application:
+    """Fetch an application by ID or raise 404."""
+    app = db.query(Application).filter(Application.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
+
+
+def _check_access(application: Application, user: User):
+    """Ensure the user is the owner or a staff/admin member."""
+    if application.applicant_id != user.id and user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+
+def _log_and_commit(db: Session, application: Application, actor_id: int, action: str, notes: str = None):
+    """Add an audit log entry, commit, and refresh the application."""
+    db.add(AuditLog(application_id=application.id, actor_id=actor_id, action=action, notes=notes))
+    db.commit()
+    db.refresh(application)
+
+
+# ── Citizen endpoints ──
 
 @router.post("", response_model=ApplicationOut, status_code=status.HTTP_201_CREATED)
 def submit_application(
@@ -30,23 +49,15 @@ def submit_application(
     db.add(application)
     db.commit()
     db.refresh(application)
-
-    db.add(AuditLog(application_id=application.id, actor_id=current_user.id, action="submitted"))
-    db.commit()
+    _log_and_commit(db, application, current_user.id, "submitted")
     return application
 
 
 @router.get("/my", response_model=List[ApplicationOut])
-def my_applications(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    return (
-        db.query(Application)
-        .filter(Application.applicant_id == current_user.id)
-        .order_by(Application.created_at.desc())
-        .all()
-    )
+def my_applications(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(Application).filter(
+        Application.applicant_id == current_user.id
+    ).order_by(Application.created_at.desc()).all()
 
 
 @router.post("/{application_id}/documents", response_model=ApplicationOut)
@@ -57,33 +68,21 @@ def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
-    
-    is_owner = application.applicant_id == current_user.id
-    is_staff_or_admin = current_user.role in (
-        UserRole.ward_staff, UserRole.district_staff, UserRole.admin
-    )
-    if not (is_owner or is_staff_or_admin):
-        raise HTTPException(status_code=403, detail="Not your application")
-
+    application = _get_app_or_404(db, application_id)
+    _check_access(application, current_user)
 
     upload_result = cloudinary_service.upload_file(file, folder="birth_certificates")
-    content_type = file.content_type or "application/octet-stream"
-    file_size_val = upload_result.get("bytes") or getattr(file, "size", None)
 
-    doc = Document(
+    db.add(Document(
         application_id=application.id,
         file_name=file.filename or "uploaded_document",
-        file_content_type=content_type,
-        file_size=file_size_val,
+        file_content_type=file.content_type or "application/octet-stream",
+        file_size=upload_result.get("bytes") or getattr(file, "size", None),
         cloudinary_public_id=upload_result.get("public_id", "unknown"),
         cloudinary_url=upload_result.get("secure_url"),
         document_type=document_type,
         uploaded_at=datetime.utcnow(),
-    )
-    db.add(doc)
+    ))
     db.commit()
     db.refresh(application)
     return application
@@ -96,27 +95,19 @@ def download_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+    application = _get_app_or_404(db, application_id)
+    _check_access(application, current_user)
 
-    # authorization: owner or staff/admin
-    is_owner = application.applicant_id == current_user.id
-    is_staff_or_admin = current_user.role in (
-        UserRole.ward_staff, UserRole.district_staff, UserRole.admin
-    )
-    if not (is_owner or is_staff_or_admin):
-        raise HTTPException(status_code=403, detail="Not authorized to view this document")
-
-    doc = db.query(Document).filter(Document.id == doc_id, Document.application_id == application_id).first()
+    doc = db.query(Document).filter(
+        Document.id == doc_id, Document.application_id == application_id
+    ).first()
     if not doc or not doc.cloudinary_public_id:
         raise HTTPException(status_code=404, detail="Document not found")
 
     return cloudinary_service.download_file_response(doc)
 
 
-
-# ---------- Shared: get single application (owner, staff, or admin) ----------
+# ── Shared endpoints ──
 
 @router.get("/{application_id}", response_model=ApplicationOut)
 def get_application(
@@ -124,46 +115,31 @@ def get_application(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
-
-    is_owner = application.applicant_id == current_user.id
-    is_staff_or_admin = current_user.role in (
-        UserRole.ward_staff, UserRole.district_staff, UserRole.admin
-    )
-    if not (is_owner or is_staff_or_admin):
-        raise HTTPException(status_code=403, detail="Not authorized to view this application")
+    application = _get_app_or_404(db, application_id)
+    _check_access(application, current_user)
     return application
 
 
 @router.get("/{application_id}/audit-logs", response_model=List[AuditLogOut])
 def get_audit_logs(
     application_id: int,
-    current_user: User = Depends(require_roles(
-        UserRole.ward_staff, UserRole.district_staff, UserRole.admin
-    )),
+    current_user: User = Depends(require_roles(UserRole.ward_staff, UserRole.district_staff, UserRole.admin)),
     db: Session = Depends(get_db),
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+    application = _get_app_or_404(db, application_id)
     return application.audit_logs
 
 
-# ---------- Ward Office Staff endpoints ----------
+# ── Ward Staff endpoints ──
 
 @router.get("/queue/ward", response_model=List[ApplicationOut])
 def ward_queue(
     current_user: User = Depends(require_roles(UserRole.ward_staff)),
     db: Session = Depends(get_db),
 ):
-    return (
-        db.query(Application)
-        .filter(Application.status.in_([ApplicationStatus.pending, ApplicationStatus.under_review]))
-        .order_by(Application.created_at.asc())
-        .all()
-    )
+    return db.query(Application).filter(
+        Application.status.in_([ApplicationStatus.pending, ApplicationStatus.under_review])
+    ).order_by(Application.created_at.asc()).all()
 
 
 @router.post("/{application_id}/ward-decision", response_model=ApplicationOut)
@@ -173,47 +149,35 @@ def ward_decision(
     current_user: User = Depends(require_roles(UserRole.ward_staff)),
     db: Session = Depends(get_db),
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+    application = _get_app_or_404(db, application_id)
 
-    if decision.action == "approve":
-        application.status = ApplicationStatus.approved
-        action_label = "approved"
-    elif decision.action == "reject":
-        application.status = ApplicationStatus.rejected
-        application.rejection_reason = decision.reason
-        action_label = "rejected"
-    elif decision.action == "forward":
-        application.status = ApplicationStatus.forwarded
-        action_label = "forwarded to district office"
-    else:
+    action_map = {
+        "approve": (ApplicationStatus.approved, "approved"),
+        "reject": (ApplicationStatus.rejected, "rejected"),
+        "forward": (ApplicationStatus.forwarded, "forwarded to district office"),
+    }
+    if decision.action not in action_map:
         raise HTTPException(status_code=400, detail="Invalid action")
 
-    db.add(AuditLog(
-        application_id=application.id,
-        actor_id=current_user.id,
-        action=action_label,
-        notes=decision.reason,
-    ))
-    db.commit()
-    db.refresh(application)
+    new_status, label = action_map[decision.action]
+    application.status = new_status
+    if decision.action == "reject":
+        application.rejection_reason = decision.reason
+
+    _log_and_commit(db, application, current_user.id, label, decision.reason)
     return application
 
 
-# ---------- District Office Staff endpoints ----------
+# ── District Staff endpoints ──
 
 @router.get("/queue/district", response_model=List[ApplicationOut])
 def district_queue(
     current_user: User = Depends(require_roles(UserRole.district_staff)),
     db: Session = Depends(get_db),
 ):
-    return (
-        db.query(Application)
-        .filter(Application.status == ApplicationStatus.forwarded)
-        .order_by(Application.created_at.asc())
-        .all()
-    )
+    return db.query(Application).filter(
+        Application.status == ApplicationStatus.forwarded
+    ).order_by(Application.created_at.asc()).all()
 
 
 @router.post("/{application_id}/district-decision", response_model=ApplicationOut)
@@ -223,34 +187,28 @@ def district_decision(
     current_user: User = Depends(require_roles(UserRole.district_staff)),
     db: Session = Depends(get_db),
 ):
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+    application = _get_app_or_404(db, application_id)
+
     if application.status != ApplicationStatus.forwarded:
         raise HTTPException(status_code=400, detail="Application has not been forwarded to district office")
 
-    if decision.action == "approve":
-        application.status = ApplicationStatus.approved
-        action_label = "final approval by district office"
-    elif decision.action == "reject":
-        application.status = ApplicationStatus.rejected
-        application.rejection_reason = decision.reason
-        action_label = "rejected by district office"
-    else:
+    action_map = {
+        "approve": (ApplicationStatus.approved, "final approval by district office"),
+        "reject": (ApplicationStatus.rejected, "rejected by district office"),
+    }
+    if decision.action not in action_map:
         raise HTTPException(status_code=400, detail="Invalid action")
 
-    db.add(AuditLog(
-        application_id=application.id,
-        actor_id=current_user.id,
-        action=action_label,
-        notes=decision.reason,
-    ))
-    db.commit()
-    db.refresh(application)
+    new_status, label = action_map[decision.action]
+    application.status = new_status
+    if decision.action == "reject":
+        application.rejection_reason = decision.reason
+
+    _log_and_commit(db, application, current_user.id, label, decision.reason)
     return application
 
 
-# ---------- Admin Override endpoint ----------
+# ── Admin Override endpoint ──
 
 @router.post("/{application_id}/admin-decision", response_model=ApplicationOut)
 def admin_decision(
@@ -259,29 +217,20 @@ def admin_decision(
     current_user: User = Depends(require_roles(UserRole.admin)),
     db: Session = Depends(get_db),
 ):
-    """Admin-only: override the status of any application at any stage."""
-    application = db.query(Application).filter(Application.id == application_id).first()
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
+    """Admin-only: override the status of any application."""
+    application = _get_app_or_404(db, application_id)
 
     if decision.action == "approve":
         application.status = ApplicationStatus.approved
-        action_label = "approved by admin (override)"
+        label = "approved by admin (override)"
     elif decision.action == "reject":
         if not decision.reason:
             raise HTTPException(status_code=400, detail="Reason is required when rejecting.")
         application.status = ApplicationStatus.rejected
         application.rejection_reason = decision.reason
-        action_label = "rejected by admin (override)"
+        label = "rejected by admin (override)"
     else:
         raise HTTPException(status_code=400, detail="Invalid action. Use 'approve' or 'reject'.")
 
-    db.add(AuditLog(
-        application_id=application.id,
-        actor_id=current_user.id,
-        action=action_label,
-        notes=decision.reason,
-    ))
-    db.commit()
-    db.refresh(application)
+    _log_and_commit(db, application, current_user.id, label, decision.reason)
     return application
